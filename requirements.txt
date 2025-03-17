@@ -1,0 +1,9 @@
+requests>=2.25.1
+pyyaml>=6.0
+sqlalchemy>=1.4.23
+click>=8.0.1
+tabulate>=0.8.9
+tqdm>=4.61.2
+beautifulsoup4>=4.9.3
+jinja2>=3.0.1
+cryptography>=3.4.8
