@@ -1,111 +1,89 @@
 # MITRE ATT&CK Signature Converter
 
-A Python application that converts MITRE ATT&CK techniques into common signature types (YARA, Sigma, and KQL) used by cybersecurity teams. The tool creates and maintains a database of techniques and their corresponding signatures, which can be used across different environments (Windows, Linux, macOS, and cloud).
+A comprehensive Python application that converts MITRE ATT&CK techniques into common signature types used by cybersecurity teams.
 
 ## Features
 
-- Fetches and stores MITRE ATT&CK techniques
-- Converts techniques to multiple signature formats:
-  - YARA rules
+- Converts MITRE ATT&CK techniques and sub-techniques to:
+  - YARA signatures
   - Sigma rules
   - KQL (Kusto Query Language) queries
-- Environment-agnostic detection rules
-- Local SQLite database for technique and signature storage
-- Command-line interface for easy integration
-- Comprehensive logging and error handling
+- Maintains a local database of techniques and their corresponding signatures
+- Command-line interface for batch conversion
+- Ability to export signatures to various formats
 
 ## Installation
 
 1. Clone the repository:
-
 ```bash
 git clone https://github.com/yourusername/mitre-sig-converter.git
 cd mitre-sig-converter
 ```
 
-2. Create and activate a virtual environment:
-
+2. Install the package:
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+pip install -e .
 ```
 
-3. Install dependencies:
-
+3. Download the latest MITRE ATT&CK data:
 ```bash
-pip install -r requirements.txt
+python scripts/download_mitre.py
 ```
 
 ## Usage
 
-### Update MITRE ATT&CK Database
+### Command Line Interface
 
-To fetch and store the latest MITRE ATT&CK techniques:
-
+Convert all techniques to signature formats:
 ```bash
-python scripts/update_database.py [--db-url DB_URL] [--log-file LOG_FILE]
+python -m mitre_sig_converter convert --all
 ```
 
-Options:
-
-- `--db-url`: Database URL (default: sqlite:///data/techniques.db)
-- `--log-file`: Log file path (default: logs/update_database.log)
-
-### Generate Signatures
-
-To generate signatures for stored techniques:
-
+Convert specific technique:
 ```bash
-python scripts/generate_signatures.py [--db-url DB_URL] [--output-dir OUTPUT_DIR] [--log-file LOG_FILE] [--technique-id TECHNIQUE_ID]
+python -m mitre_sig_converter convert --technique T1055
 ```
 
-Options:
-
-- `--db-url`: Database URL (default: sqlite:///data/techniques.db)
-- `--output-dir`: Output directory for generated signatures (default: output)
-- `--log-file`: Log file path (default: logs/generate_signatures.log)
-- `--technique-id`: Generate signatures for a specific technique ID (optional)
-
-## Project Structure
-
-```
-mitre-sig-converter/
-├── mitre_sig_converter/     # Main package
-│   ├── api/                # MITRE ATT&CK API client
-│   ├── converter/          # Signature converters
-│   ├── database/          # Database models and handlers
-│   ├── models/            # Data models
-│   └── utils/             # Utility functions
-├── scripts/               # Command-line scripts
-├── tests/                # Test cases
-├── data/                 # Data storage
-├── config/              # Configuration files
-├── requirements.txt     # Python dependencies
-└── README.md           # Project documentation
-```
-
-## Development
-
-### Running Tests
-
+Convert techniques by tactic:
 ```bash
-python -m pytest tests/
+python -m mitre_sig_converter convert --tactic "defense-evasion"
 ```
 
-### Adding New Signature Types
+Export all signatures to files:
+```bash
+python -m mitre_sig_converter export --output ./signatures
+```
 
-1. Create a new converter class in `mitre_sig_converter/converter/`
-2. Inherit from `BaseConverter` and implement required methods
-3. Update the signature generation script to include the new converter
+### Using as a Library
 
-## Contributing
+```python
+from mitre_sig_converter.api import MitreApi
+from mitre_sig_converter.converter import YaraConverter, SigmaConverter, KqlConverter
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+# Load MITRE data
+mitre_api = MitreApi()
+techniques = mitre_api.get_all_techniques()
+
+# Convert a technique to YARA
+yara_converter = YaraConverter()
+yara_rule = yara_converter.convert(techniques[0])
+print(yara_rule)
+
+# Convert a technique to Sigma
+sigma_converter = SigmaConverter()
+sigma_rule = sigma_converter.convert(techniques[0])
+print(sigma_rule)
+
+# Convert a technique to KQL
+kql_converter = KqlConverter()
+kql_query = kql_converter.convert(techniques[0])
+print(kql_query)
+```
+
+## Configuration
+
+Configuration options can be modified in `config/config.ini`.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License
