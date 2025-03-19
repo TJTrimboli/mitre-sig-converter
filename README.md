@@ -71,17 +71,17 @@ Options:
 ```
 mitre-sig-converter/
 ├── mitre_sig_converter/     # Main package
-│   ├── api/                # MITRE ATT&CK API client
-│   ├── converter/          # Signature converters
-│   ├── database/          # Database models and handlers
-│   ├── models/            # Data models
-│   └── utils/             # Utility functions
-├── scripts/               # Command-line scripts
-├── tests/                # Test cases
-├── data/                 # Data storage
-├── config/              # Configuration files
-├── requirements.txt     # Python dependencies
-└── README.md           # Project documentation
+│   ├── api/                 # MITRE ATT&CK API client
+│   ├── converter/           # Signature converters
+│   ├── database/            # Database models and handlers
+│   ├── models/              # Data models
+│   └── utils/               # Utility functions
+├── scripts/                 # Command-line scripts
+├── tests/                   # Test cases
+├── data/                    # Data storage
+├── config/                  # Configuration files
+├── requirements.txt         # Python dependencies
+└── README.md                # Project documentation
 ```
 
 ## Development
