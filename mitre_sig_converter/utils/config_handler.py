@@ -50,6 +50,9 @@ class ConfigHandler:
                 value = value[k]
             return value
         except (KeyError, TypeError):
+            # Print the config for debugging
+            print(f"\nConfig when getting {key}:")
+            print(self.config)
             return default
 
     def set(self, key: str, value: Any) -> None:

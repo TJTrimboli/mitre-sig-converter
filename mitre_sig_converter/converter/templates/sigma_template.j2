@@ -1,0 +1,33 @@
+title: {{ title }}
+id: {{ rule_id }}
+status: {{ status }}
+description: {{ description }}
+author: {{ author }}
+references:
+    {% for ref in references %}
+    - {{ ref }}
+    {% endfor %}
+tags:
+    {% for tag in tags %}
+    - {{ tag }}
+    {% endfor %}
+logsource:
+    {% for key, value in logsource.items() %}
+    {{ key }}: {{ value }}
+    {% endfor %}
+detection:
+    {% for key, value in detection.items() %}
+    {{ key }}:
+        {% if value is mapping %}
+            {% for k, v in value.items() %}
+            {{ k }}: {{ v }}
+            {% endfor %}
+        {% else %}
+            {{ value }}
+        {% endif %}
+    {% endfor %}
+falsepositives:
+    {% for fp in falsepositives %}
+    - {{ fp }}
+    {% endfor %}
+level: {{ level }} 

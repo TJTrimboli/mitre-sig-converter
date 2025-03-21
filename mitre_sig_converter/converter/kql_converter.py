@@ -236,7 +236,13 @@ class KqlConverter(BaseConverter):
             
         Returns:
             Dict[str, Any]: Context dictionary.
+
+        Raises:
+            ValueError: If technique is None.
         """
+        if technique is None:
+            raise ValueError("Technique cannot be None")
+
         context = {
             'technique_id': technique.id,
             'technique_name': technique.name,
@@ -246,7 +252,6 @@ class KqlConverter(BaseConverter):
             'is_subtechnique': technique.is_subtechnique,
             'parent_technique': technique.parent_technique_id if technique.parent_technique_id else None,
         }
-        
         return context
     
     def generate_query_name(self, technique: Technique) -> str:

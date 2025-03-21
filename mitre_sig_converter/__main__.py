@@ -3,175 +3,208 @@
 Main entry point for the MITRE ATT&CK Signature Converter.
 """
 
-import os
+import argparse
 import sys
-import click
-from tabulate import tabulate
-from tqdm import tqdm
+from typing import List, Optional
+from pathlib import Path
 
-from mitre_sig_converter.utils.logger import setup_logger
-from mitre_sig_converter.utils.config_handler import ConfigHandler
-from mitre_sig_converter.api.mitre_api import MitreApi
-from mitre_sig_converter.converter.yara_converter import YaraConverter
-from mitre_sig_converter.converter.sigma_converter import SigmaConverter
-from mitre_sig_converter.converter.kql_converter import KqlConverter
-from mitre_sig_converter.database.db_handler import DatabaseHandler
+from mitre_sig_converter.api.mitre_api import MitreApi, MitreMatrix
+from mitre_sig_converter.converter import YaraConverter, SigmaConverter, KqlConverter
+from mitre_sig_converter.database import DatabaseHandler
+from mitre_sig_converter.models import Technique
+from mitre_sig_converter.utils.logger import get_logger
 from mitre_sig_converter.utils.file_handler import FileHandler
+from mitre_sig_converter.utils.config_handler import ConfigHandler
 
-# Set up the logger
-logger = setup_logger()
-config = ConfigHandler()
+logger = get_logger(__name__)
 
-@click.group()
-def cli():
-    """MITRE ATT&CK Signature Converter - Convert techniques to various signature formats."""
-    pass
-
-@cli.command()
-@click.option("--all", is_flag=True, help="Convert all techniques")
-@click.option("--technique", help="Convert a specific technique ID (e.g., T1055)")
-@click.option("--tactic", help="Convert techniques for a specific tactic (e.g., defense-evasion)")
-@click.option("--format", type=click.Choice(["yara", "sigma", "kql", "all"]), default="all",
-              help="Signature format to convert to")
-def convert(all, technique, tactic, format):
-    """Convert MITRE ATT&CK techniques to signature formats."""
-    mitre_api = MitreApi()
-    db_handler = DatabaseHandler()
-    file_handler = FileHandler()
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="MITRE ATT&CK Signature Converter")
     
+    # Matrix selection
+    parser.add_argument(
+        "--matrix",
+        choices=["enterprise", "mobile", "ics"],
+        default="enterprise",
+        help="MITRE ATT&CK matrix to use (default: enterprise)"
+    )
+    
+    # Input options
+    parser.add_argument(
+        "--technique-id",
+        help="Specific MITRE ATT&CK technique ID to convert"
+    )
+    parser.add_argument(
+        "--tactic",
+        help="Convert all techniques for a specific tactic"
+    )
+    
+    # Output options
+    parser.add_argument(
+        "--output-dir",
+        help="Directory to save generated signatures"
+    )
+    parser.add_argument(
+        "--format",
+        choices=["yara", "sigma", "kql", "all"],
+        default="all",
+        help="Output format for signatures (default: all)"
+    )
+    
+    # Database options
+    parser.add_argument(
+        "--update-db",
+        action="store_true",
+        help="Update the local database with latest MITRE data"
+    )
+    
+    # Other options
+    parser.add_argument(
+        "--list-techniques",
+        action="store_true",
+        help="List all available techniques"
+    )
+    parser.add_argument(
+        "--list-tactics",
+        action="store_true",
+        help="List all available tactics"
+    )
+    
+    return parser.parse_args()
+
+def get_matrix_enum(matrix_str: str) -> MitreMatrix:
+    """Convert matrix string to MitreMatrix enum."""
+    matrix_map = {
+        "enterprise": MitreMatrix.ENTERPRISE,
+        "mobile": MitreMatrix.MOBILE,
+        "ics": MitreMatrix.ICS
+    }
+    return matrix_map.get(matrix_str, MitreMatrix.ENTERPRISE)
+
+def list_techniques(api: MitreApi, matrix: MitreMatrix):
+    """List all available techniques."""
+    techniques = api.get_all_techniques()
+    print(f"\nAvailable techniques for {matrix.value} matrix:")
+    print("-" * 80)
+    for technique in techniques:
+        print(f"{technique.id}: {technique.name}")
+    print(f"\nTotal techniques: {len(techniques)}")
+
+def list_tactics(api: MitreApi, matrix: MitreMatrix):
+    """List all available tactics."""
+    tactics = api.tactics.keys()
+    print(f"\nAvailable tactics for {matrix.value} matrix:")
+    print("-" * 80)
+    for tactic in sorted(tactics):
+        print(f"- {tactic}")
+    print(f"\nTotal tactics: {len(tactics)}")
+
+def convert_technique(
+    technique: Technique,
+    output_dir: Path,
+    format: str,
+    converters: dict
+):
+    """Convert a single technique to signatures."""
+    try:
+        # Create output directory if it doesn't exist
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Convert based on format
+        if format in ["yara", "all"]:
+            yara_sig = converters["yara"].convert(technique)
+            if yara_sig:
+                yara_file = output_dir / f"{technique.id}.yar"
+                yara_file.write_text(yara_sig)
+                logger.info(f"Generated YARA signature: {yara_file}")
+        
+        if format in ["sigma", "all"]:
+            sigma_sig = converters["sigma"].convert(technique)
+            if sigma_sig:
+                sigma_file = output_dir / f"{technique.id}.yml"
+                sigma_file.write_text(sigma_sig)
+                logger.info(f"Generated Sigma signature: {sigma_file}")
+        
+        if format in ["kql", "all"]:
+            kql_sig = converters["kql"].convert(technique)
+            if kql_sig:
+                kql_file = output_dir / f"{technique.id}.kql"
+                kql_file.write_text(kql_sig)
+                logger.info(f"Generated KQL signature: {kql_file}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Error converting technique {technique.id}: {e}")
+        return False
+
+def main():
+    """Main entry point."""
+    args = parse_args()
+    config = ConfigHandler()
+    
+    # Set output directory
+    output_dir = Path(args.output_dir or config.get('GENERAL', 'output_dir'))
+    
+    # Initialize components
+    matrix = get_matrix_enum(args.matrix)
+    api = MitreApi(matrix)
+    db = DatabaseHandler()
     converters = {
         "yara": YaraConverter(),
         "sigma": SigmaConverter(),
         "kql": KqlConverter()
     }
     
-    techniques_to_convert = []
-    
-    if all:
-        logger.info("Converting all techniques")
-        techniques_to_convert = mitre_api.get_all_techniques()
-    elif technique:
-        logger.info(f"Converting technique {technique}")
-        tech = mitre_api.get_technique_by_id(technique)
-        if tech:
-            techniques_to_convert = [tech]
-        else:
-            logger.error(f"Technique {technique} not found")
-            sys.exit(1)
-    elif tactic:
-        logger.info(f"Converting techniques for tactic {tactic}")
-        techniques_to_convert = mitre_api.get_techniques_by_tactic(tactic)
-        if not techniques_to_convert:
-            logger.error(f"No techniques found for tactic {tactic}")
-            sys.exit(1)
-    else:
-        logger.error("Please specify --all, --technique, or --tactic")
-        sys.exit(1)
-    
-    results = []
-    for tech in tqdm(techniques_to_convert, desc="Converting techniques"):
-        result_row = {"Technique ID": tech.id, "Name": tech.name}
-        
-        if format == "all" or format == "yara":
-            yara_rule = converters["yara"].convert(tech)
-            db_handler.save_signature(tech.id, "yara", yara_rule)
-            result_row["YARA"] = "✓"
-        
-        if format == "all" or format == "sigma":
-            sigma_rule = converters["sigma"].convert(tech)
-            db_handler.save_signature(tech.id, "sigma", sigma_rule)
-            result_row["Sigma"] = "✓"
-        
-        if format == "all" or format == "kql":
-            kql_query = converters["kql"].convert(tech)
-            db_handler.save_signature(tech.id, "kql", kql_query)
-            result_row["KQL"] = "✓"
-        
-        results.append(result_row)
-    
-    click.echo(tabulate(results, headers="keys", tablefmt="pretty"))
-    click.echo(f"Converted {len(results)} techniques")
-
-@cli.command()
-@click.option("--output", required=True, help="Output directory for exported signatures")
-@click.option("--format", type=click.Choice(["yara", "sigma", "kql", "all"]), default="all",
-              help="Signature format to export")
-def export(output, format):
-    """Export signatures to files."""
-    db_handler = DatabaseHandler()
-    file_handler = FileHandler()
-    
-    # Ensure output directory exists
-    os.makedirs(output, exist_ok=True)
-    
-    if format == "all" or format == "yara":
-        yara_dir = os.path.join(output, "yara")
-        os.makedirs(yara_dir, exist_ok=True)
-        signatures = db_handler.get_all_signatures("yara")
-        for sig in tqdm(signatures, desc="Exporting YARA rules"):
-            file_handler.write_signature(
-                os.path.join(yara_dir, f"{sig['technique_id'].lower()}.yar"),
-                sig["content"]
-            )
-    
-    if format == "all" or format == "sigma":
-        sigma_dir = os.path.join(output, "sigma")
-        os.makedirs(sigma_dir, exist_ok=True)
-        signatures = db_handler.get_all_signatures("sigma")
-        for sig in tqdm(signatures, desc="Exporting Sigma rules"):
-            file_handler.write_signature(
-                os.path.join(sigma_dir, f"{sig['technique_id'].lower()}.yml"),
-                sig["content"]
-            )
-    
-    if format == "all" or format == "kql":
-        kql_dir = os.path.join(output, "kql")
-        os.makedirs(kql_dir, exist_ok=True)
-        signatures = db_handler.get_all_signatures("kql")
-        for sig in tqdm(signatures, desc="Exporting KQL queries"):
-            file_handler.write_signature(
-                os.path.join(kql_dir, f"{sig['technique_id'].lower()}.kql"),
-                sig["content"]
-            )
-    
-    click.echo(f"Signatures exported to {output}")
-
-@cli.command()
-def list():
-    """List all techniques in the database."""
-    db_handler = DatabaseHandler()
-    techniques = db_handler.get_all_techniques()
-    
-    table_data = []
-    for tech in techniques:
-        signatures = db_handler.get_signatures_by_technique(tech["id"])
-        formats = [sig["format"] for sig in signatures]
-        table_data.append({
-            "ID": tech["id"],
-            "Name": tech["name"],
-            "YARA": "✓" if "yara" in formats else "✗",
-            "Sigma": "✓" if "sigma" in formats else "✗",
-            "KQL": "✓" if "kql" in formats else "✗"
-        })
-    
-    click.echo(tabulate(table_data, headers="keys", tablefmt="pretty"))
-
-@cli.command()
-def update():
-    """Update the MITRE ATT&CK data."""
-    from scripts.download_mitre import download_enterprise_attack
-    download_enterprise_attack()
-    click.echo("MITRE ATT&CK data updated")
-
-def main():
-    """Main entry point."""
     try:
-# Create necessary directories
-        os.makedirs(os.path.dirname(config.get('LOGGING', 'file')), exist_ok=True)
-        cli()
+        # Update database if requested
+        if args.update_db:
+            logger.info("Updating database with latest MITRE data...")
+            db.update_techniques(api.get_all_techniques())
+            logger.info("Database update complete")
+        
+        # List options
+        if args.list_techniques:
+            list_techniques(api, matrix)
+            return
+        
+        if args.list_tactics:
+            list_tactics(api, matrix)
+            return
+        
+        # Convert techniques
+        techniques: List[Technique] = []
+        
+        if args.technique_id:
+            # Convert specific technique
+            technique = api.get_technique_by_id(args.technique_id)
+            if technique:
+                techniques = [technique]
+            else:
+                logger.error(f"Technique {args.technique_id} not found")
+                return
+        
+        elif args.tactic:
+            # Convert techniques by tactic
+            techniques = api.get_techniques_by_tactic(args.tactic)
+            if not techniques:
+                logger.error(f"No techniques found for tactic: {args.tactic}")
+                return
+        
+        else:
+            # Convert all techniques
+            techniques = api.get_all_techniques()
+        
+        # Convert techniques
+        success_count = 0
+        for technique in techniques:
+            if convert_technique(technique, output_dir, args.format, converters):
+                success_count += 1
+        
+        logger.info(f"Successfully converted {success_count} of {len(techniques)} techniques")
+        
     except Exception as e:
-        logger.exception(f"Unexpected error: {e}")
-        click.echo(f"Error: {e}", err=True)
+        logger.error(f"Error: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":

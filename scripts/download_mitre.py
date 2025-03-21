@@ -6,6 +6,14 @@ import argparse
 import sys
 import json
 from datetime import datetime, UTC
+import os
+import requests
+from typing import Dict, Any, List
+
+from mitre_sig_converter.utils.config_handler import ConfigHandler
+from mitre_sig_converter.api.mitre_api import MitreMatrix
+
+logger = get_logger(__name__)
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Download and cache MITRE ATT&CK data')
@@ -15,63 +23,147 @@ def parse_args():
                        help='Log file path (default: logs/download_mitre.log)')
     return parser.parse_args()
 
-def main():
-    args = parse_args()
+class MitreDownloader:
+    """Class for downloading and caching MITRE ATT&CK data."""
     
-    # Setup logging
-    log_path = Path(args.log_file)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    logger = setup_logger('download_mitre', args.log_file)
-    
-    try:
-        # Initialize MITRE API client and file handler
-        mitre_api = MitreApi()
-        file_handler = FileHandler()
-        
-        # Create output directory
-        output_dir = Path(args.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Download enterprise matrix
-        logger.info("Downloading MITRE ATT&CK Enterprise Matrix...")
-        matrix = mitre_api.get_enterprise_matrix()
-        matrix_file = output_dir / 'enterprise_matrix.json'
-        file_handler.write_json(matrix, matrix_file)
-        logger.info(f"Enterprise matrix saved to {matrix_file}")
-        
-        # Download all techniques
-        logger.info("Downloading MITRE ATT&CK Techniques...")
-        techniques = mitre_api.get_all_techniques()
-        techniques_file = output_dir / 'techniques.json'
-        file_handler.write_json(techniques, techniques_file)
-        logger.info(f"Found {len(techniques)} techniques, saved to {techniques_file}")
-        
-        # Download tactics
-        logger.info("Downloading MITRE ATT&CK Tactics...")
-        tactics = mitre_api.get_tactics()
-        tactics_file = output_dir / 'tactics.json'
-        file_handler.write_json(tactics, tactics_file)
-        logger.info(f"Found {len(tactics)} tactics, saved to {tactics_file}")
-        
-        # Create metadata file
-        metadata = {
-            'last_updated': str(datetime.now(UTC)),
-            'version': mitre_api.VERSION,
-            'files': {
-                'enterprise_matrix': str(matrix_file),
-                'techniques': str(techniques_file),
-                'tactics': str(tactics_file)
-            }
+    def __init__(self):
+        """Initialize the MITRE downloader."""
+        self.config = ConfigHandler()
+        self.base_url = "https://raw.githubusercontent.com/mitre/cti/master"
+        self.matrices = {
+            MitreMatrix.ENTERPRISE: "enterprise-attack",
+            MitreMatrix.MOBILE: "mobile-attack",
+            MitreMatrix.ICS: "ics-attack"
         }
-        metadata_file = output_dir / 'metadata.json'
-        file_handler.write_json(metadata, metadata_file)
-        logger.info(f"Metadata saved to {metadata_file}")
+    
+    def download_matrix(self, matrix: MitreMatrix) -> Dict[str, Any]:
+        """
+        Download MITRE ATT&CK data for a specific matrix.
         
-        logger.info("MITRE ATT&CK data download completed successfully")
+        Args:
+            matrix: The MITRE ATT&CK matrix to download
+            
+        Returns:
+            Dictionary containing the downloaded data
+        """
+        matrix_name = self.matrices[matrix]
+        url = f"{self.base_url}/{matrix_name}/{matrix_name}.json"
         
-    except Exception as e:
-        logger.error(f"Error downloading MITRE data: {str(e)}")
-        sys.exit(1)
+        try:
+            logger.info(f"Downloading {matrix_name} data from {url}")
+            response = requests.get(url)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error downloading {matrix_name} data: {e}")
+            return {}
+    
+    def save_matrix_data(self, matrix: MitreMatrix, data: Dict[str, Any]) -> bool:
+        """
+        Save downloaded matrix data to file.
+        
+        Args:
+            matrix: The MITRE ATT&CK matrix
+            data: The data to save
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            output_file = self.config.get('MITRE', f'{matrix.value}_file')
+            output_dir = os.path.dirname(output_file)
+            
+            # Create output directory if it doesn't exist
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+            
+            # Save the data
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+            
+            logger.info(f"Saved {matrix.value} data to {output_file}")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving {matrix.value} data: {e}")
+            return False
+    
+    def save_metadata(self, matrix: MitreMatrix, data: Dict[str, Any]) -> bool:
+        """
+        Save metadata about the downloaded data.
+        
+        Args:
+            matrix: The MITRE ATT&CK matrix
+            data: The downloaded data
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            metadata_file = self.config.get('MITRE', f'{matrix.value}_metadata')
+            metadata_dir = os.path.dirname(metadata_file)
+            
+            # Create metadata directory if it doesn't exist
+            if metadata_dir:
+                os.makedirs(metadata_dir, exist_ok=True)
+            
+            # Extract metadata
+            metadata = {
+                'download_date': datetime.now().isoformat(),
+                'matrix': matrix.value,
+                'version': data.get('version', 'unknown'),
+                'technique_count': len([obj for obj in data.get('objects', []) 
+                                     if obj.get('type') == 'attack-pattern']),
+                'tactic_count': len([obj for obj in data.get('objects', []) 
+                                   if obj.get('type') == 'x-mitre-tactic'])
+            }
+            
+            # Save the metadata
+            with open(metadata_file, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2)
+            
+            logger.info(f"Saved {matrix.value} metadata to {metadata_file}")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving {matrix.value} metadata: {e}")
+            return False
+    
+    def download_all_matrices(self) -> bool:
+        """
+        Download and cache data for all MITRE ATT&CK matrices.
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        success = True
+        
+        for matrix in MitreMatrix:
+            # Download the data
+            data = self.download_matrix(matrix)
+            if not data:
+                success = False
+                continue
+            
+            # Save the data
+            if not self.save_matrix_data(matrix, data):
+                success = False
+                continue
+            
+            # Save metadata
+            if not self.save_metadata(matrix, data):
+                success = False
+                continue
+        
+        return success
+
+def main():
+    """Main entry point for the script."""
+    downloader = MitreDownloader()
+    
+    if downloader.download_all_matrices():
+        logger.info("Successfully downloaded and cached all MITRE ATT&CK data")
+    else:
+        logger.error("Failed to download or cache some MITRE ATT&CK data")
+        exit(1)
 
 if __name__ == '__main__':
     main()

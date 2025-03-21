@@ -24,7 +24,7 @@ class Signature(Base):
     technique_id = Column(Integer, ForeignKey('techniques.id'), nullable=False)
     signature_type = Column(String(50), nullable=False)  # YARA, Sigma, KQL
     content = Column(Text, nullable=False)
-    metadata = Column(JSON)
+    signature_metadata = Column(JSON)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
     updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
     

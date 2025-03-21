@@ -1,0 +1,22 @@
+rule {{ rule_name }}
+{
+    meta:
+        author = "{{ author }}"
+        description = "{{ description }}"
+        reference = "{{ reference }}"
+        mitre_attack_id = "{{ id }}"
+        mitre_attack_name = "{{ name }}"
+        mitre_attack_matrix = "{{ matrix }}"
+        mitre_attack_tactics = "{{ tactics|join(', ') }}"
+        mitre_attack_platforms = "{{ platforms|join(', ') }}"
+
+    strings:
+        {% for string in strings %}
+        ${{ string.id }} = {{ string.type }} {{ string.value|to_regex }}
+        {% endfor %}
+
+    condition:
+        {% for condition in conditions %}
+        {{ condition }}
+        {% endfor %}
+} 

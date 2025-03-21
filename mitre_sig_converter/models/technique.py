@@ -1,12 +1,20 @@
 """
-Model definitions for MITRE ATT&CK techniques.
+Module containing model definitions for MITRE ATT&CK techniques.
 """
-from typing import List, Optional
-from dataclasses import dataclass
+
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict, Any
+from enum import Enum
+
+class MitreMatrix(Enum):
+    """Enumeration of MITRE ATT&CK matrices."""
+    ENTERPRISE = "enterprise"
+    MOBILE = "mobile"
+    ICS = "ics"
 
 @dataclass
 class Technique:
-    """Represents a MITRE ATT&CK technique or sub-technique."""
+    """Data class representing a MITRE ATT&CK technique or sub-technique."""
     
     id: str
     name: str
@@ -17,252 +25,294 @@ class Technique:
     detection: str
     related_techniques: List[str]
     is_subtechnique: bool
+    matrix: str = field(default=MitreMatrix.ENTERPRISE.value)
+    
+    def __post_init__(self):
+        """Validate and normalize data after initialization."""
+        # Ensure lists are not None
+        self.tactics = self.tactics or []
+        self.platforms = self.platforms or []
+        self.data_sources = self.data_sources or []
+        self.related_techniques = self.related_techniques or []
+        
+        # Normalize strings
+        self.id = str(self.id).strip()
+        self.name = str(self.name).strip()
+        self.description = str(self.description).strip()
+        self.detection = str(self.detection).strip()
+        
+        # Validate matrix
+        if self.matrix not in [m.value for m in MitreMatrix]:
+            raise ValueError(f"Invalid matrix: {self.matrix}")
     
     def get_detection_patterns(self) -> List[str]:
         """
-        Extract detection patterns from technique description and detection fields.
+        Extract detection patterns from the technique's detection field.
         
         Returns:
-            List[str]: A list of detection patterns for this technique.
+            List of detection patterns found in the technique's detection field.
         """
         patterns = []
+        if not self.detection:
+            return patterns
+            
+        # Look for common pattern indicators
+        indicators = [
+            "process_name", "file_name", "command_line", "registry_key",
+            "network_connection", "service_name", "dll_name", "module_name"
+        ]
         
-        # Process direct detection statements
-        if self.detection:
-            # Split detection text into paragraphs and bullet points
-            detection_parts = self.detection.split('\n')
-            for part in detection_parts:
-                # Skip empty parts
-                if not part.strip():
-                    continue
+        for line in self.detection.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
                 
-                # Clean up the part
-                clean_part = part.strip('- *').strip()
-                if clean_part:
-                    patterns.append(clean_part)
-        
-        # Look for keywords in description that might indicate detection methods
-        detection_keywords = ['monitor', 'detect', 'look for', 'observe', 'identify']
-        desc_lines = self.description.split('\n')
-        
-        for line in desc_lines:
-            for keyword in detection_keywords:
-                if keyword in line.lower():
-                    patterns.append(line.strip())
+            for indicator in indicators:
+                if indicator in line.lower():
+                    patterns.append(line)
                     break
         
-        # Look for data sources that might be used for detection
-        if self.data_sources:
-            for source in self.data_sources:
-                patterns.append(f"Data Source: {source}")
+        return patterns
+    
+    def get_environment_agnostic_patterns(self) -> List[str]:
+        """
+        Extract environment-agnostic patterns from the technique's detection field.
+        
+        Returns:
+            List of environment-agnostic patterns found in the technique's detection field.
+        """
+        patterns = []
+        if not self.detection:
+            return patterns
+            
+        # Look for environment-agnostic indicators
+        indicators = [
+            "command_line", "process_name", "service_name", "dll_name",
+            "module_name", "network_connection"
+        ]
+        
+        for line in self.detection.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+                
+            for indicator in indicators:
+                if indicator in line.lower():
+                    patterns.append(line)
+                    break
         
         return patterns
     
     def is_applicable_to_platform(self, platform: str) -> bool:
         """
-        Check if this technique is applicable to a specific platform.
+        Check if the technique is applicable to a specific platform.
         
         Args:
-            platform: Platform to check (e.g., 'Windows', 'Linux', 'macOS')
+            platform: The platform to check (e.g., "Windows", "Linux", "macOS")
             
         Returns:
-            bool: True if the technique applies to the platform, False otherwise
+            True if the technique is applicable to the platform, False otherwise.
         """
-        if not self.platforms:  # If no platforms specified, assume applicable to all
-            return True
-        
-        # Normalize platform name for case-insensitive comparison
-        normalized_platform = platform.lower()
-        normalized_platforms = [p.lower() for p in self.platforms]
-        
-        # Check for exact match or patterns
-        if normalized_platform in normalized_platforms:
-            return True
-        
-        # Check for generalizations (e.g., if 'windows' is specified and checking for 'windows server')
-        for p in normalized_platforms:
-            if p in normalized_platform:
-                return True
-        
-        return False
+        platform = platform.lower()
+        return platform in [p.lower() for p in self.platforms]
     
     def get_common_processes(self) -> List[str]:
         """
-        Get common processes associated with this technique for detection.
+        Extract common process names from the technique's detection field.
         
         Returns:
-            List[str]: Common process names associated with the technique
+            List of common process names found in the technique's detection field.
         """
-        common_processes = []
-        
-        # Windows processes
-        windows_processes = {
-            'T1055': ['explorer.exe', 'lsass.exe', 'services.exe', 'svchost.exe'],  # Process Injection
-            'T1059': ['cmd.exe', 'powershell.exe', 'wscript.exe', 'cscript.exe'],  # Command and Scripting Interpreter
-            'T1053': ['schtasks.exe', 'at.exe'],  # Scheduled Task/Job
-            'T1218': ['regsvr32.exe', 'rundll32.exe', 'msiexec.exe'],  # System Binary Proxy Execution
-        }
-        
-        # Linux/macOS processes
-        unix_processes = {
-            'T1059': ['bash', 'sh', 'python', 'perl', 'ruby'],  # Command and Scripting Interpreter
-            'T1053': ['cron', 'at'],  # Scheduled Task/Job
-            'T1543': ['systemctl', 'launchctl', 'service'],  # Create or Modify System Process
-        }
-        
-        # Add platform-specific processes
-        if any(p.lower() in ['windows', 'win'] for p in self.platforms):
-            base_id = self.id.split('.')[0]  # Get base technique ID
-            if base_id in windows_processes:
-                common_processes.extend(windows_processes[base_id])
+        processes = []
+        if not self.detection:
+            return processes
+            
+        for line in self.detection.split('\n'):
+            line = line.strip().lower()
+            if not line:
+                continue
                 
-        if any(p.lower() in ['linux', 'macos', 'mac os'] for p in self.platforms):
-            base_id = self.id.split('.')[0]  # Get base technique ID
-            if base_id in unix_processes:
-                common_processes.extend(unix_processes[base_id])
+            if "process_name" in line:
+                # Try to extract process name from the line
+                parts = line.split('=')
+                if len(parts) > 1:
+                    process = parts[1].strip()
+                    if process:
+                        processes.append(process)
         
-        return common_processes
+        return processes
     
     def get_common_files(self) -> List[str]:
         """
-        Get common files associated with this technique for detection.
+        Extract common file paths from the technique's detection field.
         
         Returns:
-            List[str]: Common file paths or patterns associated with the technique
+            List of common file paths found in the technique's detection field.
         """
-        common_files = []
+        files = []
+        if not self.detection:
+            return files
+            
+        for line in self.detection.split('\n'):
+            line = line.strip().lower()
+            if not line:
+                continue
+                
+            if "file_name" in line or "file_path" in line:
+                # Try to extract file path from the line
+                parts = line.split('=')
+                if len(parts) > 1:
+                    file_path = parts[1].strip()
+                    if file_path:
+                        files.append(file_path)
         
-        # Add platform-specific file paths
-        if any(p.lower() == 'windows' for p in self.platforms):
-            if self.id.startswith('T1547'):  # Boot or Logon Autostart Execution
-                common_files.extend([
-                    'C:\\Windows\\System32\\Tasks\\*',
-                    'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\*',
-                    'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\*',
-                    'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\*'
-                ])
-            elif self.id.startswith('T1059'):  # Command and Scripting Interpreter
-                common_files.extend([
-                    '*.ps1', '*.bat', '*.cmd', '*.vbs', '*.js'
-                ])
-        
-        if any(p.lower() in ['linux', 'macos'] for p in self.platforms):
-            if self.id.startswith('T1547'):  # Boot or Logon Autostart Execution
-                common_files.extend([
-                    '/etc/init.d/*',
-                    '/etc/crontab',
-                    '/etc/cron.*/*',
-                    '/Library/LaunchAgents/*',
-                    '/Library/LaunchDaemons/*',
-                    '~/.bash_profile',
-                    '~/.bashrc'
-                ])
-        
-        return common_files
+        return files
     
     def get_common_registry_keys(self) -> List[str]:
         """
-        Get common registry keys associated with this technique (Windows-specific).
+        Extract common registry keys from the technique's detection field.
         
         Returns:
-            List[str]: Common registry keys or patterns associated with the technique
+            List of common registry keys found in the technique's detection field.
         """
-        if not any(p.lower() == 'windows' for p in self.platforms):
-            return []
+        registry_keys = []
+        if not self.detection:
+            return registry_keys
             
-        common_registry = []
+        for line in self.detection.split('\n'):
+            line = line.strip().lower()
+            if not line:
+                continue
+                
+            if "registry_key" in line:
+                # Try to extract registry key from the line
+                parts = line.split('=')
+                if len(parts) > 1:
+                    key = parts[1].strip()
+                    if key:
+                        registry_keys.append(key)
         
-        # Registry locations for common persistence techniques
-        if self.id.startswith('T1547'):  # Boot or Logon Autostart Execution
-            common_registry.extend([
-                'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run',
-                'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run',
-                'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce',
-                'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce'
-            ])
-        elif self.id.startswith('T1112'):  # Modify Registry
-            common_registry.extend([
-                'HKLM\\SYSTEM\\CurrentControlSet\\Services',
-                'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options',
-                'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon\\Notify',
-                'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon\\Shell'
-            ])
-        
-        return common_registry
+        return registry_keys
     
     def get_common_network_indicators(self) -> List[str]:
         """
-        Get common network indicators associated with this technique.
+        Extract network indicators from the technique's detection field.
         
         Returns:
-            List[str]: Network indicators that might help detect the technique
+            List of network indicators found in the technique's detection field.
         """
         indicators = []
-        
-        # Add technique-specific network indicators
-        if self.id.startswith('T1071'):  # Application Layer Protocol
-            indicators.extend([
-                'Unusual outbound connections to high ports',
-                'DNS queries with high entropy or encoded data',
-                'HTTP/HTTPS requests with suspicious user agents',
-                'Beaconing patterns in network traffic'
-            ])
-        elif self.id.startswith('T1095'):  # Non-Application Layer Protocol
-            indicators.extend([
-                'Direct use of TCP/UDP sockets',
-                'ICMP traffic with data',
-'Raw IP packets with unusual formats',
-                'Non-standard protocol usage'
-            ])
-        elif self.id.startswith('T1571'):  # Non-Standard Port
-            indicators.extend([
-                'Common protocols on non-standard ports',
-                'Web traffic on ports other than 80/443',
-                'Database traffic on non-standard ports'
-            ])
-        elif self.id.startswith('T1572'):  # Protocol Tunneling
-            indicators.extend([
-                'DNS tunneling patterns',
-                'HTTP/HTTPS tunneling over unexpected ports',
-                'Unusual data patterns in standard protocols'
-            ])
+        if not self.detection:
+            return indicators
+            
+        for line in self.detection.split('\n'):
+            line = line.strip().lower()
+            if not line:
+                continue
+                
+            if any(x in line for x in ["ip_address", "domain", "url", "port"]):
+                # Try to extract network indicator from the line
+                parts = line.split('=')
+                if len(parts) > 1:
+                    indicator = parts[1].strip()
+                    if indicator:
+                        indicators.append(indicator)
         
         return indicators
     
-    def get_environment_agnostic_patterns(self) -> List[str]:
+    def get_common_commands(self) -> List[str]:
         """
-        Get detection patterns that are agnostic to the environment.
+        Extract common commands from the technique's detection field.
         
         Returns:
-            List[str]: Environment-agnostic detection patterns
+            List of common commands found in the technique's detection field.
         """
-        patterns = []
+        commands = []
+        if not self.detection:
+            return commands
+            
+        for line in self.detection.split('\n'):
+            line = line.strip().lower()
+            if not line:
+                continue
+                
+            if "command_line" in line or "command" in line:
+                # Try to extract command from the line
+                parts = line.split('=')
+                if len(parts) > 1:
+                    command = parts[1].strip()
+                    if command:
+                        commands.append(command)
         
-        # Generic patterns applicable across platforms
-        if self.id.startswith('T1055'):  # Process Injection
-            patterns.extend([
-                'Unusual memory allocation patterns',
-                'Process creating threads in another process',
-                'Unexpected process handle operations'
-            ])
-        elif self.id.startswith('T1059'):  # Command and Scripting Interpreter
-            patterns.extend([
-                'Execution of script interpreters with suspicious arguments',
-                'Encoded or obfuscated command line arguments',
-                'Script execution from unusual locations'
-            ])
-        elif self.id.startswith('T1569'):  # System Services
-            patterns.extend([
-                'Service creation with unusual executable paths',
-                'Service modifications with suspicious command lines',
-                'Unexpected service starts or stops'
-            ])
-        elif self.id.startswith('T1078'):  # Valid Accounts
-            patterns.extend([
-                'Authentication from unusual locations',
-                'Login attempts at unusual times',
-                'Multiple failed login attempts followed by successful login',
-                'Privileged account usage for routine tasks'
-            ])
+        return commands
+    
+    def get_common_services(self) -> List[str]:
+        """
+        Extract common service names from the technique's detection field.
         
-        return patterns
+        Returns:
+            List of common service names found in the technique's detection field.
+        """
+        services = []
+        if not self.detection:
+            return services
+            
+        for line in self.detection.split('\n'):
+            line = line.strip().lower()
+            if not line:
+                continue
+                
+            if "service_name" in line or "service" in line:
+                # Try to extract service name from the line
+                parts = line.split('=')
+                if len(parts) > 1:
+                    service = parts[1].strip()
+                    if service:
+                        services.append(service)
+        
+        return services
+    
+    @property
+    def parent_technique_id(self) -> Optional[str]:
+        """
+        Get the parent technique ID for a sub-technique.
+        
+        Returns:
+            The parent technique ID if this is a sub-technique, None otherwise.
+        """
+        if self.is_subtechnique and '.' in self.id:
+            return self.id.split('.')[0]
+        return None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the technique to a dictionary.
+        
+        Returns:
+            Dictionary representation of the technique.
+        """
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'tactics': self.tactics,
+            'platforms': self.platforms,
+            'data_sources': self.data_sources,
+            'detection': self.detection,
+            'related_techniques': self.related_techniques,
+            'is_subtechnique': self.is_subtechnique,
+            'matrix': self.matrix
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Technique':
+        """
+        Create a Technique instance from a dictionary.
+        
+        Args:
+            data: Dictionary containing technique data
+            
+        Returns:
+            Technique instance created from the dictionary
+        """
+        return cls(**data)

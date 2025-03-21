@@ -67,22 +67,25 @@ class SigmaConverter(BaseConverter):
         }
         
         # Process selection criteria based on technique type
-        if technique.common_processes:
+        common_processes = technique.get_common_processes()
+        if common_processes:
             # Process-based detection
             detection['selection'].update({
-                'Image|endswith': technique.get_common_processes()
+                'Image|endswith': common_processes
             })
         
-        if technique.common_files:
+        common_files = technique.get_common_files()
+        if common_files:
             # File-based detection
             detection['selection'].update({
-                'TargetFilename|endswith': technique.get_common_files()
+                'TargetFilename|endswith': common_files
             })
         
-        if technique.common_registry_keys:
+        common_registry_keys = technique.get_common_registry_keys()
+        if common_registry_keys:
             # Registry-based detection
             detection['selection'].update({
-                'TargetObject|contains': technique.get_common_registry_keys()
+                'TargetObject|contains': common_registry_keys
             })
         
         # Add environment-agnostic detection patterns

@@ -1,0 +1,37 @@
+// MITRE ATT&CK Technique: {{ technique_name }} ({{ technique_id }})
+// Matrix: {{ matrix }}
+// Tactics: {{ tactics|join(', ') }}
+// Platforms: {{ platforms|join(', ') }}
+// Author: {{ author }}
+// Reference: {{ reference }}
+
+{% for table in tables %}
+let {{ table }}_data = {{ table }}
+{% endfor %}
+
+let result = union
+    {% for part in query_parts %}
+    {{ part.table }}_data
+    | where {{ part.where }}
+    {% if not loop.last %},{% endif %}
+    {% endfor %}
+;
+
+result
+| project
+    TimeGenerated,
+    Computer,
+    Account,
+    Process,
+    CommandLine,
+    TargetFilename,
+    RegistryKey,
+    NetworkProtocol,
+    DestinationPort,
+    QueryName,
+    EventID,
+    EventType,
+    EventLevel,
+    EventSource,
+    EventDescription
+| order by TimeGenerated desc 

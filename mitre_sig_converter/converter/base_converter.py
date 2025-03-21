@@ -112,7 +112,13 @@ class BaseConverter(ABC):
             
         Returns:
             Dict[str, Any]: Context dictionary for template rendering.
+
+        Raises:
+            ValueError: If technique is None.
         """
+        if technique is None:
+            raise ValueError("Technique cannot be None")
+
         # Base context with technique information
         context = {
             'technique': technique,
@@ -128,5 +134,4 @@ class BaseConverter(ABC):
             'common_registry_keys': technique.get_common_registry_keys(),
             'network_indicators': technique.get_common_network_indicators(),
         }
-        
         return context
